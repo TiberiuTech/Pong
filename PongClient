@@ -1,0 +1,277 @@
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.KeyEvent;
+import java.awt.event.KeyListener;
+import java.io.*;
+import java.net.Socket;
+
+public class PongClient extends JFrame implements KeyListener {
+    private Socket socket;
+    private BufferedReader in;
+    private PrintWriter out;
+    private GamePanel gamePanel = new GamePanel();
+
+    public PongClient(String serverAddress, int serverPort) throws IOException {
+        socket = new Socket(serverAddress, serverPort);
+        in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+        out = new PrintWriter(socket.getOutputStream(), true);
+
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(800, 600);
+        setVisible(true);
+        add(gamePanel);
+        setFocusable(true);
+        addKeyListener(this);
+        gamePanel.setFocusable(false);
+        gamePanel.requestFocusInWindow();
+        gamePanel.startGame();
+        listenForServerMessages();
+    }
+
+    private void listenForServerMessages() {
+        new Thread(() -> {
+            try {
+                String fromServer;
+                while ((fromServer = in.readLine()) != null) {
+                    processServerCommand(fromServer);
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
+    private void processServerCommand(String command) {
+        String[] parts = command.split(" ");
+        if (parts.length >= 2 && parts[0].equals("UPDATE")) {
+            gamePanel.setScore(parts[1], parts[2]);
+        } else if (parts.length == 3 && parts[0].equals("MOVE")) {
+            int paddleNumber = Integer.parseInt(parts[1]);
+            int direction = parts[2].equals("UP") ? -1 : (parts[2].equals("DOWN") ? 1 : 0);
+            gamePanel.setPaddleDirection(paddleNumber, direction);
+        } else if (parts.length == 2 && parts[0].equals("STOP")) {
+            int paddleNumber = Integer.parseInt(parts[1]);
+            gamePanel.setPaddleDirection(paddleNumber, 0);
+        } else if (parts[0].equals("GAMEOVER")) {
+            gamePanel.displayWinner(parts[1]);
+        }
+    }
+
+    public void keyTyped(KeyEvent e) {
+    }
+
+    public void keyPressed(KeyEvent e) {
+        switch (e.getKeyCode()) {
+            case KeyEvent.VK_UP:
+                out.println("MOVE 2 UP");
+                break;
+            case KeyEvent.VK_DOWN:
+                out.println("MOVE 2 DOWN");
+                break;
+            case KeyEvent.VK_W:
+                out.println("MOVE 1 UP");
+                break;
+            case KeyEvent.VK_S:
+                out.println("MOVE 1 DOWN");
+                break;
+        }
+    }
+
+    public void keyReleased(KeyEvent e) {
+        switch (e.getKeyCode()) {
+            case KeyEvent.VK_UP:
+            case KeyEvent.VK_DOWN:
+                out.println("STOP 2");
+                break;
+            case KeyEvent.VK_W:
+            case KeyEvent.VK_S:
+                out.println("STOP 1");
+                break;
+        }
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            try {
+                new PongClient("localhost", 5000);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    class GamePanel extends JPanel {
+        private Timer timer;
+        private Ball ball;
+        private Paddle paddle1, paddle2;
+        private int score1 = 0, score2 = 0;
+        private JButton retryButton;
+        public GamePanel() {
+            ball = new Ball(400, 300);
+            paddle1 = new Paddle(30, 250);
+            paddle2 = new Paddle(750, 250);
+            setLayout(new BorderLayout());
+            retryButton = new JButton("Retry");
+            retryButton.addActionListener(e -> resetGame());
+            retryButton.setVisible(false);
+            add(retryButton, BorderLayout.SOUTH);
+        }
+
+        void startGame() {
+            if (timer == null) {
+                timer = new Timer(10, e -> {
+                    update();
+                    repaint();
+                });
+                timer.start();
+            }
+        }
+
+        void setScore(String score1, String score2) {
+            this.score1 = Integer.parseInt(score1);
+            this.score2 = Integer.parseInt(score2);
+            repaint();
+        }
+
+        void displayWinner(String winner) {
+            stopGame();
+            JOptionPane.showMessageDialog(this, winner, "Game Over", JOptionPane.INFORMATION_MESSAGE);
+        }
+
+        void resetGame() {
+            score1 = 0;
+            score2 = 0;
+            resetBallAndPaddles();
+            retryButton.setVisible(false);
+            startGame();
+        }
+
+        void stopGame() {
+            if (timer != null) {
+                timer.stop();
+                timer = null;
+            }
+
+            retryButton.setVisible(true);
+        }
+
+        void setPaddleDirection(int paddleNumber, int direction) {
+            if (paddleNumber == 1) {
+                paddle1.setYDirection(direction);
+            } else if (paddleNumber == 2) {
+                paddle2.setYDirection(direction);
+            }
+        }
+
+        private void update() {
+            ball.move();
+            paddle1.move();
+            paddle2.move();
+            checkCollisions();
+        }
+
+        private void checkCollisions() {
+            if (ball.x + Ball.DIAMETER > paddle2.x && ball.y + Ball.DIAMETER > paddle2.y && ball.y < paddle2.y + Paddle.HEIGHT) {
+                ball.xa = -ball.xa;
+            }
+            if (ball.x < paddle1.x + Paddle.WIDTH && ball.y + Ball.DIAMETER > paddle1.y && ball.y < paddle1.y + Paddle.HEIGHT) {
+                ball.xa = -ball.xa;
+            }
+            if (ball.x < 0) {
+                score2++;
+                if (score2 >= 3) {
+                    out.println("GAMEOVER: Player 2 Wins!");
+                    stopGame();
+                    return;
+                } else {
+                    out.println(score1 + " " + score2);
+                }
+                resetBallAndPaddles();
+            } else if (ball.x > getWidth()) {
+                score1++;
+                if (score1 >= 3) {
+                    out.println("GAMEOVER: Player 1 Wins!");
+                    stopGame();
+                    return;
+                } else {
+                    out.println(score1 + " " + score2);
+                }
+                resetBallAndPaddles();
+            }
+            if (ball.y < 0 || ball.y > getHeight() - Ball.DIAMETER) {
+                ball.ya = -ball.ya;
+            }
+        }
+
+        private void resetBallAndPaddles() {
+            ball.x = getWidth() / 2 - Ball.DIAMETER / 2;
+            ball.y = getHeight() / 2 - Ball.DIAMETER / 2;
+            ball.xa = 1;
+            ball.ya = 1;
+
+            paddle1.y = getHeight() / 2 - Paddle.HEIGHT / 2;
+            paddle2.y = getHeight() / 2 - Paddle.HEIGHT / 2;
+        }
+
+        protected void paintComponent(Graphics g) {
+            super.paintComponent(g);
+            ball.paint(g);
+            paddle1.paint(g);
+            paddle2.paint(g);
+            drawScore(g);
+        }
+
+        private void drawScore(Graphics g) {
+            g.setColor(Color.WHITE);
+            g.setFont(new Font("Arial", Font.BOLD, 36));
+            g.drawString(String.valueOf(score1), 370, 50);
+            g.drawString(String.valueOf(score2), 430, 50);
+        }
+
+        class Ball {
+            int x, y;
+            int xa = 1, ya = 1;
+            static final int DIAMETER = 30;
+
+            public Ball(int initialX, int initialY) {
+                x = initialX;
+                y = initialY;
+            }
+
+            void move() {
+                x += xa;
+                y += ya;
+            }
+
+            void paint(Graphics g) {
+                g.fillOval(x, y, DIAMETER, DIAMETER);
+            }
+        }
+
+        class Paddle {
+            int x, y;
+            int ya = 0;
+            static final int WIDTH = 10, HEIGHT = 60;
+            static final int SPEED = 5;
+
+            public Paddle(int x, int y) {
+                this.x = x;
+                this.y = y;
+            }
+
+            void move() {
+                y += ya * SPEED;
+                y = Math.min(y, getHeight() - HEIGHT);
+                y = Math.max(y, 0);
+            }
+
+            void setYDirection(int yDir) {
+                ya = yDir;
+            }
+
+            void paint(Graphics g) {
+                g.fillRect(x, y, WIDTH, HEIGHT);
+            }
+        }
+    }
+}
