@@ -1,0 +1,98 @@
+import java.io.*;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
+
+public class PongServer {
+    private int port;
+    private List<ClientHandler> clients = new ArrayList<>();
+
+    public PongServer(int port) {
+        this.port = port;
+    }
+
+    public void execute() {
+        try (ServerSocket serverSocket = new ServerSocket(port)) {
+            System.out.println("Server is listening on port " + port);
+
+            while (true) {
+                Socket socket = serverSocket.accept();
+                System.out.println("New client connected");
+
+                ClientHandler newUser = new ClientHandler(socket, this);
+                clients.add(newUser);
+                newUser.start();
+
+                if (clients.size() == 2) {
+                    startGame();
+                }
+            }
+        } catch (IOException ex) {
+            System.out.println("Server exception: " + ex.getMessage());
+            ex.printStackTrace();
+        }
+    }
+
+    void startGame() {
+        System.out.println("Starting the game");
+        broadcast("START GAME");
+    }
+
+    void broadcast(String message) {
+        for (ClientHandler aUser : clients) {
+            aUser.sendMessage(message);
+        }
+    }
+
+    public static void main(String[] args) {
+        int port = 5000;
+        PongServer server = new PongServer(port);
+        server.execute();
+    }
+
+    private static class ClientHandler extends Thread {
+        private Socket socket;
+        private PongServer server;
+        private BufferedReader reader;
+        private PrintWriter writer;
+
+        public ClientHandler(Socket socket, PongServer server) {
+            this.socket = socket;
+            this.server = server;
+            try {
+                InputStream input = socket.getInputStream();
+                reader = new BufferedReader(new InputStreamReader(input));
+                OutputStream output = socket.getOutputStream();
+                writer = new PrintWriter(output, true);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+
+        public void run() {
+            try {
+                String clientCommand;
+                while ((clientCommand = reader.readLine()) != null) {
+                    if (!clientCommand.startsWith("MOVE") && !clientCommand.startsWith("STOP")) {
+                        System.out.println("Server received command: " + clientCommand);
+                    }
+                    server.broadcast(clientCommand);
+                }
+            } catch (IOException ex) {
+                System.out.println("Error in ClientHandler: " + ex.getMessage());
+                ex.printStackTrace();
+            } finally {
+                try {
+                    socket.close();
+                } catch (IOException ex) {
+                    ex.printStackTrace();
+                }
+            }
+        }
+
+        void sendMessage(String message) {
+            writer.println(message);
+        }
+    }
+}
