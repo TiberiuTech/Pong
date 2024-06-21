@@ -12,6 +12,6 @@ Pong - This Pong game is implemented using Java, utilizing sockets for network c
 
 ![Retry](https://github.com/TiberiuTech/Pong/blob/main/retry.png)
 
-#Demo
+# Demo
 
 [Demo Video](https://drive.google.com/file/d/1qfnbLDR0EbUF4P0iD7hIFHbL33xpm1rr/view?usp=sharing)
